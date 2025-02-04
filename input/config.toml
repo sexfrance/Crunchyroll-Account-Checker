@@ -1,0 +1,4 @@
+[dev]
+Debug = false
+Proxyless = true
+Threads = 1

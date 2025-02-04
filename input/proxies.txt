@@ -1,0 +1,4 @@
+# Add your proxies here (one per line)
+# Format: ip:port or user:pass@ip:port
+127.0.0.1:8080
+user:123456@127.0.0.1:8081
